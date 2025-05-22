@@ -281,7 +281,7 @@ supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_
 
 # set up CORS
 origins = [
-    "https://web-front-articlesummarizer.vercel.app",
+    "https://web-ai-legal-assist.vercel.app/",
     "https://web-front-articlesummarizer.vercel.app/",
     "http://localhost:5173",
 ]
