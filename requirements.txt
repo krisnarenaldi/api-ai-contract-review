@@ -1,0 +1,26 @@
+# Core dependencies
+fastapi
+uvicorn
+pandas
+python-dotenv
+
+# LangChain and related libraries
+langchain-core
+langchain
+langchain-community
+langchain-text-splitters
+langchain-anthropic
+langchain-huggingface
+langchain-chroma
+
+# PDF processing
+PyPDF2
+
+# Supabase client
+supabase
+
+# For HuggingFace Embeddings
+sentence-transformers
+
+# Optional: If using Chroma vector store
+chromadb
