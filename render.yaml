@@ -6,7 +6,7 @@ services:
     name: contract-review-api
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn api_contract_review:app"
+    startCommand: "uvicorn api_contract_review:app --host 0.0.0.0 --port 10000"
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
