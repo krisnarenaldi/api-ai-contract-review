@@ -28,4 +28,4 @@ chromadb
 
 # upload file
 python-multipart
-hf_xet
+hf-xet
