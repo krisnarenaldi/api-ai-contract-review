@@ -24,3 +24,6 @@ sentence-transformers
 
 # Optional: If using Chroma vector store
 chromadb
+
+# upload file
+python-multipart
