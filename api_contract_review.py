@@ -2,6 +2,11 @@ import os
 import re
 import pandas as pd
 from dotenv import load_dotenv
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Set environment variable to avoid tokenizers parallelism warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -281,9 +286,12 @@ supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_
 
 # set up CORS
 origins = [
-    "https://web-ai-legal-assist.vercel.app/",
-    "https://web-front-articlesummarizer.vercel.app/",
+    "https://web-ai-legal-assist.vercel.app",
+    "https://web-front-articlesummarizer.vercel.app",
     "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "*"  # Allow all origins temporarily for testing
 ]
 
 app = FastAPI()
@@ -346,6 +354,7 @@ async def analyze_pdf(
     file_pdf: UploadFile = File(...),
     x_api_key: str = Header(None)
 ):
+    logger.info(f"Received request to analyze PDF: {file_pdf.filename}")
     # Print request information for debugging
     print(f"Request headers: {request.headers}")
     print(f"Content type: {file_pdf.content_type}")
@@ -357,6 +366,7 @@ async def analyze_pdf(
     
     try:
         # Validate API key with Supabase
+        logger.info(f"Validating API key: {x_api_key[:5]}...")
         x_api_key = x_api_key.strip('"')
         response = supabase.table("profiles").select("id").eq("api_key", x_api_key).execute()
         
@@ -439,7 +449,9 @@ async def analyze_pdf(
             "risks": risks
         })
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error during analysis: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
     finally:
         try:
             os.remove(tmp_path)
@@ -450,6 +462,16 @@ async def analyze_pdf(
 @app.get("/")
 async def root():
     return {"message": "Contract Review API is running"}
+
+@app.get("/test")
+async def test():
+    """Simple endpoint to test if the API is running"""
+    return {"status": "ok", "message": "API is running"}
+
+@app.options("/analyze")
+async def options_analyze():
+    """Handle preflight requests for CORS"""
+    return {}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
