@@ -3,6 +3,9 @@ import re
 import pandas as pd
 from dotenv import load_dotenv
 import logging
+import io
+from PyPDF2 import PdfReader
+from langchain_core.documents import Document
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -245,34 +248,6 @@ class ContractReviewRAG:
         return  self.analyze_contract(query)
 
 
-# if __name__ == "__main__":
-#     # Check if API key is set
-#     if not os.environ.get("ANTHROPIC_API_KEY"):
-#         print("Warning: ANTHROPIC_API_KEY environment variable is not set")
-#         print("Please create a .env file with your Anthropic API key or set it directly")
-#         print("Example: ANTHROPIC_API_KEY=your-api-key-here")
-#     else:
-#         print("API key found in environment variables")
-#         contract_rag = ContractReviewRAG()
-#         print("ContractReviewRAG initialized successfully")
-        
-#         #2. Muat kontrak
-#         contract_rag.load_contracts("./kontrak/")
-
-#         #3. Muat Db
-#         contract_rag.load_existing_database()
-
-#         #4. analisa kontrak
-#         result = contract_rag.analyze_contract("Apakah terdapat klausul pembatasan tanggung jawab? Jelaskan maksimum tanggung jawab para pihak")
-#         print(result["sources"])
-#         print(result["answer"])
-
-#         #5. Identifikasi resiko
-#         risks = contract_rag.identify_risks()
-#         for query, answer in risks.items():
-#             print(f"\nQ: {query}")
-#             print(f"A: {answer}")
-
 # ---- FastAPI API for PDF upload and analysis ----
 from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -348,6 +323,33 @@ async def verify_api_key(x_api_key: str = Header(None)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+def extract_text_from_pdf(pdf_path):
+    """
+    Extract text from PDF using PyPDF2 as a fallback method
+    """
+    try:
+        # First try with PyPDF2
+        reader = PdfReader(pdf_path)
+        text = ""
+        metadata = {"source": pdf_path}
+        documents = []
+        
+        for i, page in enumerate(reader.pages):
+            page_text = page.extract_text()
+            if page_text:
+                page_metadata = metadata.copy()
+                page_metadata["page"] = i + 1
+                documents.append(Document(page_content=page_text, metadata=page_metadata))
+        
+        if not documents:
+            logger.warning("PyPDF2 couldn't extract text, PDF might be scanned or have security restrictions")
+            return None
+            
+        return documents
+    except Exception as e:
+        logger.error(f"Error extracting text with PyPDF2: {str(e)}")
+        return None
+
 @app.post("/analyze")
 async def analyze_pdf(
     request: Request,
@@ -404,14 +406,32 @@ async def analyze_pdf(
         raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
     
     try:
-        # Load the PDF using PyPDFLoader (single file)
-        loader = PyPDFLoader(tmp_path)
-        documents = loader.load()
+        # Configure PyPDF logging to capture warnings
+        pypdf_logger = logging.getLogger("pypdf")
+        pypdf_handler = logging.StreamHandler()
+        pypdf_logger.addHandler(pypdf_handler)
+        pypdf_logger.setLevel(logging.WARNING)
+        
+        # Load the PDF using PyPDFLoader with error handling
+        logger.info(f"Loading PDF from {tmp_path}")
+        try:
+            loader = PyPDFLoader(tmp_path)
+            documents = loader.load()
+            
+            if not documents:
+                logger.warning("PyPDFLoader returned empty documents, trying fallback method")
+                documents = extract_text_from_pdf(tmp_path)
+        except Exception as pdf_error:
+            logger.warning(f"Error with PyPDFLoader: {str(pdf_error)}, trying fallback method")
+            documents = extract_text_from_pdf(tmp_path)
         
         if not documents:
-            raise HTTPException(status_code=400, detail="Could not extract text from PDF")
+            raise HTTPException(status_code=400, detail="Could not extract text from PDF. The file may be scanned, corrupted, or password-protected.")
+            
+        logger.info(f"Successfully loaded {len(documents)} pages from PDF")
 
         # Split into chunks
+        logger.info("Splitting document into chunks")
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
@@ -420,9 +440,12 @@ async def analyze_pdf(
         chunks = splitter.split_documents(documents)
         
         if not chunks:
-            raise HTTPException(status_code=400, detail="Could not split document into chunks")
+            raise HTTPException(status_code=400, detail="Could not split document into chunks. The PDF may not contain extractable text.")
+            
+        logger.info(f"Split document into {len(chunks)} chunks")
 
         # Create a new instance for this analysis
+        logger.info("Creating vector store")
         contract_rag = ContractReviewRAG()
         contract_rag.vectorstore = Chroma.from_documents(
             documents=chunks,
@@ -432,18 +455,23 @@ async def analyze_pdf(
         contract_rag._setup_qa_chain()
 
         # Example analysis: extract main clauses and risks
+        logger.info("Extracting contract clauses")
         clauses_df = contract_rag.extract_contract_clauses()
+        
+        logger.info("Identifying risks")
         risks = contract_rag.identify_risks()
 
         # Analysis completed successfully, now deduct credit
         try:
             # Deduct 1 credit after successful analysis
+            logger.info(f"Deducting credit for user {user_id}")
             supabase.table("credit_contract_reviews").update({"credit": credit - 1}).eq("user_id", user_id).execute()
-            print(f"Credit deducted for user {user_id}. Remaining credits: {credit - 1}")
+            logger.info(f"Credit deducted for user {user_id}. Remaining credits: {credit - 1}")
         except Exception as e:
-            print(f"Warning: Failed to deduct credit: {str(e)}")
+            logger.warning(f"Failed to deduct credit: {str(e)}")
             # Continue anyway since the analysis was successful
 
+        logger.info("Analysis completed successfully")
         return JSONResponse({
             "clauses": clauses_df.to_dict(orient="records"),
             "risks": risks
@@ -455,8 +483,9 @@ async def analyze_pdf(
     finally:
         try:
             os.remove(tmp_path)
-        except:
-            pass
+            logger.info(f"Removed temporary file {tmp_path}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to remove temporary file: {str(cleanup_error)}")
 
 # Add a simple test endpoint
 @app.get("/")

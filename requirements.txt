@@ -15,7 +15,7 @@ langchain-chroma
 
 # PDF processing
 pypdf
-PyPDF2
+PyPDF2>=3.0.0
 
 # Supabase client
 supabase
