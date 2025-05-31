@@ -8,7 +8,7 @@ from PyPDF2 import PdfReader
 from langchain_core.documents import Document
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Set environment variable to avoid tokenizers parallelism warning

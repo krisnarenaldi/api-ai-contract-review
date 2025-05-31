@@ -29,3 +29,6 @@ chromadb
 # upload file
 python-multipart
 hf-xet
+
+# log
+logging
